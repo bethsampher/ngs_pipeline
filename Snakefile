@@ -1,16 +1,16 @@
-rule_all:
+rule all:
   input:
-    "/home/joyvan/pipeline_data/SRR622461_1_fastqc.html",
-    "/home/joyvan/pipeline_data/SRR622461_2_fastqc.html"
-    "/home/joyvan/pipeline_data/SRR622461_fastp.txt"
-    "/home/joyvan/pipeline_data/SRR622461_1_fastp_fastqc.html",
-    "/home/joyvan/pipeline_data/SRR622461_2_fastp_fastqc.html",
-    "/home/joyvan/pipeline_data/SRR622461_sorted.bam.bai",
-    "/home/joyvan/pipeline_data/SRR622461_sorted_flagstats.txt",
-    "/home/joyvan/pipeline_data/SRR622461_refined.bam.bai"
-    "/home/joyvan/pipeline_data/SRR622461_refined_flagstats.txt",
-    "/home/joyvan/pipeline_data/SRR622461_coverage.txt",
-    "/home/joyvan/pipeline_data/SRR622461_CYP2C19.vcf"
+    "/home/jovyan/pipeline_data/SRR622461_1_fastqc.html",
+    "/home/jovyan/pipeline_data/SRR622461_2_fastqc.html",
+    "/home/jovyan/pipeline_data/SRR622461_fastp.txt",
+    "/home/jovyan/pipeline_data/SRR622461_1_fastp_fastqc.html",
+    "/home/jovyan/pipeline_data/SRR622461_2_fastp_fastqc.html",
+    "/home/jovyan/pipeline_data/SRR622461_sorted.bam.bai",
+    "/home/jovyan/pipeline_data/SRR622461_sorted_flagstats.txt",
+    "/home/jovyan/pipeline_data/SRR622461_refined.bam.bai",
+    "/home/jovyan/pipeline_data/SRR622461_refined_flagstats.txt",
+    "/home/jovyan/pipeline_data/SRR622461_coverage.txt",
+    "/home/jovyan/pipeline_data/SRR622461_CYP2C19.vcf"
 
 rule fastqc:
   input:
@@ -28,13 +28,15 @@ rule fastp:
   output:
     fwd="{filename}_1_fastp.fastq.gz",
     rev="{filename}_2_fastp.fastq.gz",
+    json="{filename}_fastp.json",
+    html="{filename}_fastp.html",
     cmd="{filename}_fastp.txt"
   shell:
-    "fastp --thread 8 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction 2 > {output.cmd}"
+    "fastp --thread 8 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction --json {output.json} --html {output.html} > {output.cmd}"
 
-rule bwa_mem
+rule bwa_mem:
   input:
-    ref="/home/joyvan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
+    ref="/home/jovyan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
     fwd="{filename}_1_fastp.fastq.gz",
     rev="{filename}_2_fastp.fastq.gz"
   output:
@@ -42,7 +44,7 @@ rule bwa_mem
   shell:
     "bwa mem -t 8 {input.ref} {input.fwd} {input.rev} > {output}"
 
-rule sam_to_bam
+rule sam_to_bam:
   input:
     "{filename}.sam"
   output:
@@ -50,7 +52,7 @@ rule sam_to_bam
   shell:
     "samtools view -b {input} -o {output} -@ 8"
 
-rule sort_bam
+rule sort_bam:
   input:
     "{filename}.bam"
   output:
@@ -58,7 +60,7 @@ rule sort_bam
   shell:
     "samtools sort {input} -o {output} -@ 8"
 
-rule index_bam
+rule index_bam:
   input:
     "{filename}.bam"
   output:
@@ -66,7 +68,7 @@ rule index_bam
   shell:
     "samtools index {input} -@ 8"
 
-rule samtools_flagstat
+rule samtools_flagstat:
   input:
     "{filename}.bam"
   output:
@@ -74,16 +76,16 @@ rule samtools_flagstat
   shell:
     "samtools flagstat {input} -@ 8 > {output}"
 
-rule mark_duplicates
+rule mark_duplicates:
   input:
     "{filename}_sorted.bam"
   output:
     bam="{filename}_refined.bam",
-    metrics="dupl_metrics.txt"
+    metrics="{filename}_dupl_metrics.txt"
   shell:
     "picard MarkDuplicates INPUT={input} OUTPUT={output.bam} METRICS_FILE={output.metrics}"
 
-rule samtools_depth
+rule samtools_depth:
   input:
     "{filename}_refined.bam"
   output:
@@ -91,16 +93,16 @@ rule samtools_depth
   shell:
     "samtools depth -a {input} > {output}"
 
-rule call_variants
+rule call_variants:
   input:
-    ref="/home/joyvan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
+    ref="/home/jovyan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
     bam="{filename}_refined.bam"
   output:
     "{filename}.vcf"
   shell:
     "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -L chr10 -mbq 20 --minimum-mapping-quality 50 -O {output}"
 
-rule filter_variants
+rule filter_variants:
   input:
     "{filename}.vcf"
   output:
@@ -110,17 +112,17 @@ rule filter_variants
   shell:
     "vcftools --vcf {input} --minDP 3 --minQ 20 --recode --recode-INFO-all --stdout | vcftools --max-missing 1 --out {output} --recode --recode-INFO-all --kept-sites --removed-sites"
 
-rule annotate_variants
+rule annotate_variants:
   input:
     "{filename}_filtered.vcf"
   output:
     vcf="{filename}_annotated.vcf",
-    html="/home/joyvan/pipeline_data/snpEff_summary.html",
-    txt="/home/joyvan/pipeline_data/snpEff_genes.txt"
+    html="{filename}_snpEff_summary.html",
+    txt="{filename}_snpEff_genes.txt"
   shell:
-    "snpEff GRCh38 {input} -stats '/home/joyvan/pipeline_data/' > {output.vcf}"
+    "snpEff GRCh38 {input} -stats '/home/jovyan/pipeline_data/' > {output.vcf}"
 
-rule filter_annotations
+rule filter_annotations:
   input:
     "{filename}_annotated.vcf"
   output:
