@@ -2,15 +2,17 @@ rule_all:
   input:
     "/home/joyvan/pipeline_data/SRR622461_1_fastqc.html",
     "/home/joyvan/pipeline_data/SRR622461_2_fastqc.html"
+    "/home/joyvan/pipeline_data/SRR622461_fastp.txt"
     "/home/joyvan/pipeline_data/SRR622461_1_fastp_fastqc.html",
     "/home/joyvan/pipeline_data/SRR622461_2_fastp_fastqc.html",
     "/home/joyvan/pipeline_data/SRR622461_sorted.bam.bai",
-    "/home/joyvan/pipeline_data/SRR622461_stats.txt",
-    "/home/joyvan/pipeline_data/SRR622461_final.bam.bai"
-    "/home/joyvan/pipeline_data/SRR622461_refined_stats.txt",
-    "/home/joyvan/pipeline_data/SRR622461_coverage.txt"
+    "/home/joyvan/pipeline_data/SRR622461_sorted_flagstats.txt",
+    "/home/joyvan/pipeline_data/SRR622461_refined.bam.bai"
+    "/home/joyvan/pipeline_data/SRR622461_refined_flagstats.txt",
+    "/home/joyvan/pipeline_data/SRR622461_coverage.txt",
+    "/home/joyvan/pipeline_data/SRR622461_CYP2C19.vcf"
 
-rule fastqc_original:
+rule fastqc:
   input:
     "{filename}.fastq.gz"
   output:
@@ -25,22 +27,14 @@ rule fastp:
     rev="{filename}_2.fastq.gz"
   output:
     fwd="{filename}_1_fastp.fastq.gz",
-    rev="{filename}_2_fastp.fastq.gz"
+    rev="{filename}_2_fastp.fastq.gz",
+    cmd="{filename}_fastp.txt"
   shell:
-    "fastp --thread 8 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction"
-
-rule fastqc_fastp:
-  input:
-    "{filename}_fastp.fastq.gz"
-  output:
-    "{filename}_fastp_fastqc.html",
-    "{filename}_fastp_fastqc.zip"
-  shell:
-    "fastqc {input}"
+    "fastp --thread 8 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction 2 > {output.cmd}"
 
 rule bwa_mem
   input:
-    ref="",
+    ref="/home/joyvan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
     fwd="{filename}_1_fastp.fastq.gz",
     rev="{filename}_2_fastp.fastq.gz"
   output:
@@ -64,61 +58,73 @@ rule sort_bam
   shell:
     "samtools sort {input} -o {output} -@ 8"
 
-rule index_sorted_bam
+rule index_bam
   input:
-    "{filename}_sorted.bam"
+    "{filename}.bam"
   output:
-    "{filename}_sorted.bam.bai"
+    "{filename}.bam.bai"
   shell:
     "samtools index {input} -@ 8"
 
 rule samtools_flagstat
   input:
-    "{filename}_sorted.bam"    
+    "{filename}.bam"
   output:
-    "{filename}_stats.txt"
+    "{filename}_flagstats.txt"
   shell:
-    "samtools flagstat {input} -@ 8 > {output}" 
+    "samtools flagstat {input} -@ 8 > {output}"
 
 rule mark_duplicates
   input:
     "{filename}_sorted.bam"
   output:
-    bam="{filename}_final.bam",
+    bam="{filename}_refined.bam",
     metrics="dupl_metrics.txt"
   shell:
     "picard MarkDuplicates INPUT={input} OUTPUT={output.bam} METRICS_FILE={output.metrics}"
 
-rule index_final_bam
-  input:
-    "{filename}_final.bam"
-  output:
-    "{filename}_final.bam.bai"
-  shell:
-    "samtools index {input} -@ 8"
-
-rule samtools_flagstat_refined
-  input:
-    "{filename}_final.bam"    
-  output:
-    "{filename}_refined_stats.txt"
-  shell:
-    "samtools flagstat {input} -@ 8 > {output}" 
-
 rule samtools_depth
   input:
-    "{filename}_final.bam"    
+    "{filename}_refined.bam"
   output:
     "{filename}_coverage.txt"
   shell:
-    "samtools depth -a {input} > {output}" 
+    "samtools depth -a {input} > {output}"
 
 rule call_variants
   input:
-    ref="",
-    bam="{filename}_final.bam"
+    ref="/home/joyvan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
+    bam="{filename}_refined.bam"
   output:
     "{filename}.vcf"
   shell:
     "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -L chr10 -mbq 20 --minimum-mapping-quality 50 -O {output}"
+
+rule filter_variants
+  input:
+    "{filename}.vcf"
+  output:
+    "{filename}_filtered.vcf",
+    "{filename}_filtered.kept.sites",
+    "{filename}_filtered.removed.sites"
+  shell:
+    "vcftools --vcf {input} --minDP 3 --minQ 20 --recode --recode-INFO-all --stdout | vcftools --max-missing 1 --out {output} --recode --recode-INFO-all --kept-sites --removed-sites"
+
+rule annotate_variants
+  input:
+    "{filename}_filtered.vcf"
+  output:
+    vcf="{filename}_annotated.vcf",
+    html="/home/joyvan/pipeline_data/snpEff_summary.html",
+    txt="/home/joyvan/pipeline_data/snpEff_genes.txt"
+  shell:
+    "snpEff GRCh38 {input} -stats '/home/joyvan/pipeline_data/' > {output.vcf}"
+
+rule filter_annotations
+  input:
+    "{filename}_annotated.vcf"
+  output:
+    "{filename}_CYP2C19.vcf"
+  shell:
+    "cat {input} | SnpSift filter (ANN[*].GENE = 'CYP2C19') > {output}"
 
