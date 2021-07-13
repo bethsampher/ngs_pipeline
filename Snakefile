@@ -1,16 +1,26 @@
 rule all:
   input:
-    "/home/jovyan/pipeline_data/SRR622461_1_fastqc.html",
-    "/home/jovyan/pipeline_data/SRR622461_2_fastqc.html",
-    "/home/jovyan/pipeline_data/SRR622461_fastp.txt",
     "/home/jovyan/pipeline_data/SRR622461_1_fastp_fastqc.html",
     "/home/jovyan/pipeline_data/SRR622461_2_fastp_fastqc.html",
     "/home/jovyan/pipeline_data/SRR622461_sorted.bam.bai",
     "/home/jovyan/pipeline_data/SRR622461_sorted_flagstats.txt",
     "/home/jovyan/pipeline_data/SRR622461_refined.bam.bai",
     "/home/jovyan/pipeline_data/SRR622461_refined_flagstats.txt",
-    "/home/jovyan/pipeline_data/SRR622461_coverage.txt",
     "/home/jovyan/pipeline_data/SRR622461_CYP2C19.vcf"
+
+rule fastp_filter:
+  input:
+    fwd="{filename}_1.fastq.gz",
+    rev="{filename}_2.fastq.gz"
+  output:
+    fwd=temp("{filename}_1_fastp.fastq.gz"),
+    rev=temp("{filename}_2_fastp.fastq.gz"),
+    json="{filename}_fastp.json",
+    html="{filename}_fastp.html",
+    out="{filename}_fastp.txt"
+  threads: 16
+  shell:
+    "fastp --thread 16 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction --json {output.json} --html {output.html} 2> {output.out}"
 
 rule fastqc:
   input:
@@ -18,115 +28,109 @@ rule fastqc:
   output:
     "{filename}_fastqc.html",
     "{filename}_fastqc.zip"
+  threads: 16
   shell:
-    "fastqc {input}"
-
-rule fastp:
-  input:
-    fwd="{filename}_1.fastq.gz",
-    rev="{filename}_2.fastq.gz"
-  output:
-    fwd="{filename}_1_fastp.fastq.gz",
-    rev="{filename}_2_fastp.fastq.gz",
-    json="{filename}_fastp.json",
-    html="{filename}_fastp.html",
-    cmd="{filename}_fastp.txt"
-  shell:
-    "fastp --thread 8 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction --json {output.json} --html {output.html} > {output.cmd}"
+    "fastqc -t 16 {input}"
 
 rule bwa_mem:
   input:
-    ref="/home/jovyan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
+    ref="/home/jovyan/pipeline_data/Homo_sapiens.GRCh38.dna.toplevel.fa",
     fwd="{filename}_1_fastp.fastq.gz",
     rev="{filename}_2_fastp.fastq.gz"
   output:
-    "{filename}.sam"
+    temp("{filename}.sam")
+  threads: 16
   shell:
-    "bwa mem -t 8 {input.ref} {input.fwd} {input.rev} > {output}"
+    "bwa mem -t 16 -R '@RG\\tID:1\\tLB:library\\tPL:Illumina\\tPU:lane1\\tSM:NA12878' {input.ref} {input.fwd} {input.rev} > {output}"
 
 rule sam_to_bam:
   input:
     "{filename}.sam"
   output:
-    "{filename}.bam"
+    temp("{filename}.bam")
+  threads: 16
   shell:
-    "samtools view -b {input} -o {output} -@ 8"
+    "samtools view -b {input} -o {output} -@ 16"
 
-rule sort_bam:
+rule samtools_sort:
   input:
     "{filename}.bam"
   output:
     "{filename}_sorted.bam"
+  threads: 16
   shell:
-    "samtools sort {input} -o {output} -@ 8"
+    "samtools sort {input} -o {output} -@ 16"
 
-rule index_bam:
+rule samtools_index:
   input:
     "{filename}.bam"
   output:
     "{filename}.bam.bai"
+  threads: 16
   shell:
-    "samtools index {input} -@ 8"
+    "samtools index {input} -@ 16"
 
 rule samtools_flagstat:
   input:
     "{filename}.bam"
   output:
     "{filename}_flagstats.txt"
+  threads: 16
   shell:
-    "samtools flagstat {input} -@ 8 > {output}"
+    "samtools flagstat {input} -@ 16 > {output}"
 
-rule mark_duplicates:
+rule picard_remove_duplicates:
   input:
     "{filename}_sorted.bam"
   output:
     bam="{filename}_refined.bam",
     metrics="{filename}_dupl_metrics.txt"
   shell:
-    "picard MarkDuplicates INPUT={input} OUTPUT={output.bam} METRICS_FILE={output.metrics}"
+    "picard MarkDuplicates I={input} O={output.bam} METRICS_FILE={output.metrics} REMOVE_DUPLICATES=true"
 
-rule samtools_depth:
+rule gatk_haplotype_caller:
   input:
-    "{filename}_refined.bam"
-  output:
-    "{filename}_coverage.txt"
-  shell:
-    "samtools depth -a {input} > {output}"
-
-rule call_variants:
-  input:
-    ref="/home/jovyan/pipeline_data/GCF_000001405.26_GRCh38_genomic.fna",
+    ref="/home/jovyan/pipeline_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz",
     bam="{filename}_refined.bam"
   output:
     "{filename}.vcf"
+    "{filename}.vcf.idx"
   shell:
-    "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -L chr10 -mbq 20 --minimum-mapping-quality 50 -O {output}"
+    "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -O {output} -mbq 20"
 
-rule filter_variants:
+rule vcftools_filter:
   input:
     "{filename}.vcf"
   output:
-    "{filename}_filtered.vcf",
-    "{filename}_filtered.kept.sites",
-    "{filename}_filtered.removed.sites"
+    temp("{filename}.recode.vcf"),
+    "{filename}.log"
   shell:
-    "vcftools --vcf {input} --minDP 3 --minQ 20 --recode --recode-INFO-all --stdout | vcftools --max-missing 1 --out {output} --recode --recode-INFO-all --kept-sites --removed-sites"
+    "vcftools --vcf {input} --out '/home/jovyan/pipeline_data/SRR622461' --minDP 3 --minQ 20 --recode --recode-INFO-all"
 
-rule annotate_variants:
+rule vcftools_exclude:
   input:
-    "{filename}_filtered.vcf"
+    "{filename}.recode.vcf"
+  output:
+    temp("{filename}_filtered.recode.vcf"),
+    "{filename}_filtered.log"
+  shell:
+    "vcftools --vcf {input} --out '/home/jovyan/pipeline_data/SRR622461_filtered' --max-missing 1 --recode --recode-INFO-all"
+
+rule snpeff_annotate:
+  input:
+    "{filename}_filtered.recode.vcf"
   output:
     vcf="{filename}_annotated.vcf",
     html="{filename}_snpEff_summary.html",
-    txt="{filename}_snpEff_genes.txt"
+    html="{filename}_snpEff_summary.genes.txt"
   shell:
-    "snpEff GRCh38 {input} -stats '/home/jovyan/pipeline_data/' > {output.vcf}"
+    "snpEff -Xmx4G GRCh38.104 {input} -stats {output.html} > {output.vcf}"
 
-rule filter_annotations:
+rule snpsift_filter:
   input:
     "{filename}_annotated.vcf"
   output:
     "{filename}_CYP2C19.vcf"
   shell:
-    "cat {input} | SnpSift filter (ANN[*].GENE = 'CYP2C19') > {output}"
+    "cat {input} | SnpSift filter \"ANN[*].GENE = 'CYP2C19'\" > {output}"
 
