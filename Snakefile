@@ -34,7 +34,7 @@ rule fastqc:
 
 rule bwa_mem:
   input:
-    ref="/home/jovyan/pipeline_data/Homo_sapiens.GRCh38.dna.toplevel.fa",
+    ref="/home/jovyan/pipeline_data/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
     fwd="{filename}_1_fastp.fastq.gz",
     rev="{filename}_2_fastp.fastq.gz"
   output:
@@ -90,13 +90,13 @@ rule picard_remove_duplicates:
 
 rule gatk_haplotype_caller:
   input:
-    ref="/home/jovyan/pipeline_data/Homo_sapiens.GRCh38.dna.toplevel.fa.gz",
+    ref="/home/jovyan/pipeline_data/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
     bam="{filename}_refined.bam"
   output:
-    "{filename}.vcf"
-    "{filename}.vcf.idx"
+    vcf="{filename}.vcf",
+    idx="{filename}.vcf.idx"
   shell:
-    "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -O {output} -mbq 20"
+    "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -O {output.vcf} -mbq 20"
 
 rule vcftools_filter:
   input:
@@ -105,7 +105,7 @@ rule vcftools_filter:
     temp("{filename}.recode.vcf"),
     "{filename}.log"
   shell:
-    "vcftools --vcf {input} --out '/home/jovyan/pipeline_data/SRR622461' --minDP 3 --minQ 20 --recode --recode-INFO-all"
+    "vcftools --vcf {input} --out {wildcards.filename} --minDP 3 --minQ 20 --recode --recode-INFO-all"
 
 rule vcftools_exclude:
   input:
@@ -114,7 +114,7 @@ rule vcftools_exclude:
     temp("{filename}_filtered.recode.vcf"),
     "{filename}_filtered.log"
   shell:
-    "vcftools --vcf {input} --out '/home/jovyan/pipeline_data/SRR622461_filtered' --max-missing 1 --recode --recode-INFO-all"
+    "vcftools --vcf {input} --out {wildcards.filename} --max-missing 1 --recode --recode-INFO-all"
 
 rule snpeff_annotate:
   input:
@@ -122,7 +122,7 @@ rule snpeff_annotate:
   output:
     vcf="{filename}_annotated.vcf",
     html="{filename}_snpEff_summary.html",
-    html="{filename}_snpEff_summary.genes.txt"
+    txt="{filename}_snpEff_summary.genes.txt"
   shell:
     "snpEff -Xmx4G GRCh38.104 {input} -stats {output.html} > {output.vcf}"
 
