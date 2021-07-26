@@ -20,7 +20,10 @@ rule fastp_filter:
     out="{filename}_fastp.txt"
   threads: 8
   shell:
-    "fastp --thread 8 -i {input.fwd} -o {output.fwd} -I {input.rev} -O {output.rev} --disable_adapter_trimming --length_required 36 -3 --correction --json {output.json} --html {output.html} 2> {output.out}"
+    "fastp --thread 8 -i {input.fwd} -o {output.fwd} \
+    -I {input.rev} -O {output.rev} --disable_adapter_trimming \
+    --length_required 36 -3 --correction --json {output.json} \
+    --html {output.html} 2> {output.out}"
 
 rule fastqc:
   input:
@@ -41,7 +44,8 @@ rule bwa_mem:
     temp("{filename}.sam")
   threads: 8
   shell:
-    "bwa mem -t 8 -R '@RG\\tID:1\\tLB:library\\tPL:Illumina\\tPU:lane1\\tSM:NA12878' {input.ref} {input.fwd} {input.rev} > {output}"
+    "bwa mem -t 8 -R '@RG\\tID:1\\tLB:library\\tPL:Illumina\\tPU:lane1\\tSM:NA12878' \
+    {input.ref} {input.fwd} {input.rev} > {output}"
 
 rule sam_to_bam:
   input:
@@ -86,7 +90,8 @@ rule picard_remove_duplicates:
     bam="{filename}_refined.bam",
     metrics="{filename}_dupl_metrics.txt"
   shell:
-    "picard MarkDuplicates I={input} O={output.bam} METRICS_FILE={output.metrics} REMOVE_DUPLICATES=true"
+    "picard MarkDuplicates I={input} O={output.bam} \
+    METRICS_FILE={output.metrics} REMOVE_DUPLICATES=true"
 
 rule gatk_haplotype_caller:
   input:
@@ -96,7 +101,8 @@ rule gatk_haplotype_caller:
     vcf="{filename}.vcf",
     idx="{filename}.vcf.idx"
   shell:
-    "gatk HaplotypeCaller -R {input.ref} -I {input.bam} -O {output.vcf} -L 10 -mbq 20"
+    "gatk HaplotypeCaller -R {input.ref} \
+    -I {input.bam} -O {output.vcf} -L 10 -mbq 20"
 
 rule vcftools_filter:
   input:
@@ -105,7 +111,8 @@ rule vcftools_filter:
     temp("{filename}.recode.vcf"),
     "{filename}.log"
   shell:
-    "vcftools --vcf {input} --out {wildcards.filename} --minDP 3 --minQ 20 --recode --recode-INFO-all"
+    "vcftools --vcf {input} --out {wildcards.filename} \
+    --minDP 3 --minQ 20 --recode --recode-INFO-all"
 
 rule vcftools_exclude:
   input:
@@ -114,7 +121,8 @@ rule vcftools_exclude:
     temp("{filename}_filtered.recode.vcf"),
     "{filename}_filtered.log"
   shell:
-    "vcftools --vcf {input} --out {wildcards.filename}_filtered --max-missing 1 --recode --recode-INFO-all"
+    "vcftools --vcf {input} --out {wildcards.filename}_filtered \
+    --max-missing 1 --recode --recode-INFO-all"
 
 rule snpeff_annotate:
   input:
